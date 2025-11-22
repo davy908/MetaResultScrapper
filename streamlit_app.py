@@ -1,19 +1,27 @@
 """
 Meta Ads Library Scraper - Web App
 Interface web bonita e fácil de usar com Streamlit
+VERSÃO CORRIGIDA PARA STREAMLIT CLOUD
 """
 
 import streamlit as st
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from webdriver_manager.chrome import ChromeDriverManager
 import time
 import json
 from datetime import datetime
 import pandas as pd
+
+# Importações do Selenium dentro de try/except
+try:
+    from selenium import webdriver
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.chrome.service import Service
+    from selenium.webdriver.chrome.options import Options
+    from webdriver_manager.chrome import ChromeDriverManager
+    SELENIUM_AVAILABLE = True
+except ImportError:
+    SELENIUM_AVAILABLE = False
+    st.error("⚠️ Selenium não disponível. Instale com: pip install selenium webdriver-manager")
 
 
 # Configuração da página
@@ -73,6 +81,8 @@ class MetaAdsScraper:
     """Classe do scraper adaptada para Streamlit"""
     
     def __init__(self):
+        if not SELENIUM_AVAILABLE:
+            raise Exception("Selenium não está instalado. Verifique requirements.txt")
         self.driver = None
         self.wait = None
     
@@ -88,13 +98,25 @@ class MetaAdsScraper:
         options.add_argument('--disable-gpu')
         options.add_argument('--disable-blink-features=AutomationControlled')
         options.add_argument('--log-level=3')
+        options.add_argument('--disable-software-rasterizer')
+        options.add_argument('--disable-extensions')
+        
+        # Para Streamlit Cloud (usa chromium-browser)
+        options.binary_location = '/usr/bin/chromium-browser'
         
         try:
-            service = Service(ChromeDriverManager().install())
-            self.driver = webdriver.Chrome(service=service, options=options)
+            # Tenta usar o chromedriver do sistema primeiro (Streamlit Cloud)
+            try:
+                service = Service('/usr/bin/chromedriver')
+                self.driver = webdriver.Chrome(service=service, options=options)
+            except:
+                # Fallback: usa webdriver-manager
+                service = Service(ChromeDriverManager().install())
+                self.driver = webdriver.Chrome(service=service, options=options)
+            
             self.wait = WebDriverWait(self.driver, 15)
         except Exception as e:
-            raise Exception(f"Erro ao iniciar navegador: {e}")
+            raise Exception(f"Erro ao iniciar navegador: {e}\n\nCertifique-se de que o arquivo apt.txt está presente com chromium-browser e chromium-chromedriver")
     
     def buscar_por_url(self, url):
         """Busca por URL completa"""

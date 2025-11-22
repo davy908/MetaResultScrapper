@@ -1,65 +1,14 @@
 [theme]
-   primaryColor = "#667eea"
-   backgroundColor = "#ffffff"
-   secondaryBackgroundColor = "#f0f2f6"
-   textColor = "#262730"
-   
-   [server]
-   headless = true
-   enableCORS = false
-   
-   [browser]
-   gatherUsageStats = false
-```
+primaryColor = "#667eea"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f0f2f6"
+textColor = "#262730"
+font = "sans serif"
 
-4. Clique em **"Commit new file"**
+[server]
+headless = true
+enableCORS = false
+enableXsrfProtection = false
 
-✅ Pasta e arquivo criados!
-
----
-
-## 🎯 CHECKLIST FINAL
-
-Verifique se seu repositório tem EXATAMENTE estes arquivos:
-```
-✅ streamlit_app.py
-✅ requirements.txt
-✅ apt.txt              ⭐ NOVO!
-✅ README.md
-✅ .streamlit/
-   └── config.toml     ⭐ NOVO!
-
-❌ packages.txt         (NÃO DEVE EXISTIR!)
-```
-
----
-
-## 🚀 PASSO 7: Aguardar o Streamlit redesployar
-
-Depois que você fez todas as mudanças:
-
-1. Acesse: **https://share.streamlit.io**
-2. Vá em **"My apps"**
-3. Encontre seu app **"meta-ads-scraper"**
-4. Ele vai mostrar **"Updating..."** ou **"Building..."**
-5. Aguarde **3-5 minutos**
-6. ✅ **Done!** Seu app estará funcionando!
-
----
-
-## 📸 GUIA VISUAL (em texto)
-
-### **Como ficam os arquivos:**
-```
-Seu repositório no GitHub:
-
-┌─────────────────────────────────────┐
-│  📁 meta-ads-scraper               │
-├─────────────────────────────────────┤
-│  📄 streamlit_app.py               │  ← Clique aqui para editar
-│  📄 requirements.txt               │  ← Clique aqui para editar
-│  📄 apt.txt                        │  ← Crie este novo
-│  📄 README.md                      │
-│  📁 .streamlit                     │
-│     └─ 📄 config.toml              │  ← Crie este novo
-└─────────────────────────────────────┘
+[browser]
+gatherUsageStats = false

@@ -21,6 +21,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
 # CSS customizado
 st.markdown("""
     <style>
@@ -80,8 +81,7 @@ def get_driver():
     options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
     
     # Configurações de performance
-    options.add_argument('--disable-images')
-    options.add_argument('--disable-javascript')  # Para páginas estáticas
+    # options.add_argument('--disable-images')  # Comentado - pode ajudar no debug
     
     # IMPORTANTE: Usar Chromium do sistema (instalado via apt.txt)
     options.binary_location = '/usr/bin/chromium'
@@ -157,42 +157,163 @@ class MetaAdsScraper:
         return self._extrair_dados()
     
     def _extrair_dados(self):
-        """Extrai dados da página"""
+        """Extrai dados da página com múltiplos seletores"""
         dados = {
             'timestamp': datetime.now().isoformat(),
             'url': self.driver.current_url,
             'total_resultados': None,
-            'anuncios': []
+            'anuncios': [],
+            'page_source_length': len(self.driver.page_source)
         }
         
-        # Extrai total de resultados
+        # Aguarda a página carregar completamente
+        time.sleep(8)
+        
+        # Extrai total de resultados - tenta vários seletores
+        total_encontrado = False
+        
+        # Método 1: Pelo seletor que você mencionou
         try:
             elemento = self.driver.find_element(
                 By.CSS_SELECTOR, 
-                "div[role='heading'][aria-level='3']"
+                "div.x8t9es0.x1uxerd5.xrohxju.x108nfp6.xq9mrsl.x1h4wwuj.x117nqv4.xeuugli"
             )
             dados['total_resultados'] = elemento.text
+            total_encontrado = True
         except:
-            dados['total_resultados'] = "Não encontrado"
+            pass
         
-        # Rola a página
-        self._scroll_page(scrolls=3)
+        # Método 2: Por role e aria-level
+        if not total_encontrado:
+            try:
+                elemento = self.driver.find_element(
+                    By.CSS_SELECTOR, 
+                    "div[role='heading'][aria-level='3']"
+                )
+                dados['total_resultados'] = elemento.text
+                total_encontrado = True
+            except:
+                pass
         
-        # Extrai anúncios
+        # Método 3: Busca por texto que contém "result"
+        if not total_encontrado:
+            try:
+                elementos = self.driver.find_elements(By.XPATH, "//*[contains(text(), 'result')]")
+                for elem in elementos:
+                    texto = elem.text.lower()
+                    if 'result' in texto and any(char.isdigit() for char in texto):
+                        dados['total_resultados'] = elem.text
+                        total_encontrado = True
+                        break
+            except:
+                pass
+        
+        # Método 4: Busca qualquer heading level 3
+        if not total_encontrado:
+            try:
+                elementos = self.driver.find_elements(By.CSS_SELECTOR, "h3, [role='heading']")
+                for elem in elementos:
+                    texto = elem.text
+                    if texto and any(char.isdigit() for char in texto):
+                        dados['total_resultados'] = texto
+                        total_encontrado = True
+                        break
+            except:
+                pass
+        
+        if not total_encontrado:
+            dados['total_resultados'] = "Não encontrado (verifique seletores)"
+        
+        # Rola a página para carregar mais conteúdo
+        self._scroll_page(scrolls=5, delay=3)
+        
+        # Extrai anúncios - múltiplos métodos
+        anuncios_encontrados = 0
+        
+        # Método 1: Por data-pagelet
         try:
             cards = self.driver.find_elements(By.CSS_SELECTOR, "div[data-pagelet]")
-            
-            for i, card in enumerate(cards[:20]):
+            for i, card in enumerate(cards[:30]):
                 try:
                     texto = card.text
-                    if texto and len(texto) > 50:
+                    if texto and len(texto) > 30:
                         dados['anuncios'].append({
-                            'index': i + 1,
-                            'texto': texto[:500]
+                            'index': anuncios_encontrados + 1,
+                            'texto': texto[:500],
+                            'metodo': 'data-pagelet'
                         })
+                        anuncios_encontrados += 1
                 except:
                     continue
-        except Exception as e:
+        except:
+            pass
+        
+        # Método 2: Por estrutura de card comum
+        if anuncios_encontrados == 0:
+            try:
+                selectors = [
+                    "div[class*='_5pcr']",
+                    "div[class*='_4-u2']",
+                    "div[class*='_3-8y']",
+                    "div[data-testid*='ad']",
+                    "article",
+                    "div[role='article']"
+                ]
+                
+                for selector in selectors:
+                    cards = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    if cards:
+                        for i, card in enumerate(cards[:30]):
+                            try:
+                                texto = card.text
+                                if texto and len(texto) > 30:
+                                    dados['anuncios'].append({
+                                        'index': anuncios_encontrados + 1,
+                                        'texto': texto[:500],
+                                        'metodo': selector
+                                    })
+                                    anuncios_encontrados += 1
+                            except:
+                                continue
+                        if anuncios_encontrados > 0:
+                            break
+            except:
+                pass
+        
+        # Método 3: Captura tudo que parece ser um card
+        if anuncios_encontrados == 0:
+            try:
+                # Pega todos os divs com bastante texto
+                all_divs = self.driver.find_elements(By.TAG_NAME, "div")
+                for i, div in enumerate(all_divs):
+                    try:
+                        texto = div.text
+                        # Se tem entre 100 e 2000 caracteres, provavelmente é um anúncio
+                        if texto and 100 < len(texto) < 2000:
+                            dados['anuncios'].append({
+                                'index': anuncios_encontrados + 1,
+                                'texto': texto[:500],
+                                'metodo': 'div-text-length'
+                            })
+                            anuncios_encontrados += 1
+                            if anuncios_encontrados >= 20:
+                                break
+                    except:
+                        continue
+            except:
+                pass
+        
+        # Debug info
+        dados['debug_info'] = {
+            'total_divs': len(self.driver.find_elements(By.TAG_NAME, "div")),
+            'total_elements': len(self.driver.find_elements(By.CSS_SELECTOR, "*")),
+            'page_title': self.driver.title
+        }
+        
+        # Captura preview do HTML para debug
+        try:
+            dados['page_source_preview'] = self.driver.page_source[:5000]
+        except:
             pass
         
         return dados
@@ -354,16 +475,30 @@ def exibir_resultados(dados):
     
     st.markdown("---")
     
+    # Debug Info
+    if 'debug_info' in dados:
+        with st.expander("🔍 Informações de Debug"):
+            debug = dados['debug_info']
+            st.write(f"**Título da página:** {debug.get('page_title', 'N/A')}")
+            st.write(f"**Total de DIVs:** {debug.get('total_divs', 0)}")
+            st.write(f"**Total de elementos:** {debug.get('total_elements', 0)}")
+            st.write(f"**Tamanho do HTML:** {dados.get('page_source_length', 0)} caracteres")
+    
     # URL da busca
     with st.expander("🔗 URL da busca"):
         st.code(dados.get('url', 'N/A'))
     
+    # Screenshot do que foi carregado (se possível)
+    with st.expander("📸 Preview do HTML (primeiros 5000 caracteres)"):
+        if 'page_source_preview' in dados:
+            st.code(dados['page_source_preview'][:5000], language='html')
+    
     # Anúncios
     if dados.get('anuncios'):
-        st.subheader("📢 Anúncios Encontrados")
+        st.subheader(f"📢 {len(dados['anuncios'])} Anúncios Encontrados")
         
         for ad in dados['anuncios']:
-            with st.expander(f"Anúncio #{ad['index']}"):
+            with st.expander(f"Anúncio #{ad['index']} (Método: {ad.get('metodo', 'N/A')})"):
                 st.text_area(
                     "Conteúdo",
                     ad['texto'],
@@ -385,7 +520,25 @@ def exibir_resultados(dados):
                 use_container_width=True
             )
     else:
-        st.warning("⚠️ Nenhum anúncio foi extraído. Tente ajustar a busca.")
+        st.warning("⚠️ Nenhum anúncio foi extraído")
+        
+        st.info("""
+        **💡 Possíveis causas:**
+        
+        1. **A página não carregou completamente** - Tente aumentar o tempo de espera
+        2. **Os seletores CSS mudaram** - O Facebook muda frequentemente a estrutura
+        3. **A página requer login** - Algumas páginas só mostram anúncios logado
+        4. **O Page ID está incorreto** - Verifique se o ID está correto
+        
+        **🔧 Soluções:**
+        - Tente buscar novamente (pode ser instabilidade)
+        - Verifique o "Preview do HTML" acima para ver se a página carregou
+        - Acesse a URL manualmente no navegador para confirmar que existem anúncios
+        """)
+        
+        # Botão para tentar novamente
+        if st.button("🔄 Tentar Novamente"):
+            st.rerun()
 
 
 if __name__ == "__main__":

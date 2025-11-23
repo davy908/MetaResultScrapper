@@ -104,7 +104,7 @@ class MetaAdsScraper:
         self.wait = WebDriverWait(self.driver, 20) if driver else None
     
     def buscar_por_page_id(self, page_id):
-        """Busca anúncios de uma página específica"""
+        """Busca APENAS o total de resultados - rápido!"""
         if not self.driver:
             return None
         
@@ -113,10 +113,17 @@ class MetaAdsScraper:
         try:
             self.driver.get(url)
             
-            # Aguarda a página carregar completamente
-            time.sleep(10)
+            # Aguarda apenas 5 segundos - só precisamos do total!
+            time.sleep(5)
             
-            return self._extrair_dados()
+            # Extrai APENAS o total
+            total = self._extrair_total_resultados()
+            
+            return {
+                'timestamp': datetime.now().isoformat(),
+                'url': url,
+                'total_resultados': total
+            }
         
         except Exception as e:
             return {
@@ -126,7 +133,7 @@ class MetaAdsScraper:
             }
     
     def buscar_por_url(self, url):
-        """Busca por URL completa"""
+        """Busca por URL completa - APENAS total"""
         if not self.driver:
             return None
         
@@ -138,8 +145,15 @@ class MetaAdsScraper:
         # Ou usa a URL diretamente
         try:
             self.driver.get(url)
-            time.sleep(10)
-            return self._extrair_dados()
+            time.sleep(5)
+            
+            total = self._extrair_total_resultados()
+            
+            return {
+                'timestamp': datetime.now().isoformat(),
+                'url': url,
+                'total_resultados': total
+            }
         except Exception as e:
             return {
                 'erro': str(e),
@@ -147,43 +161,16 @@ class MetaAdsScraper:
                 'timestamp': datetime.now().isoformat()
             }
     
-    def _extrair_dados(self):
-        """
-        Extrai dados da página do Facebook Ads Library
-        Baseado na estrutura real da página
-        """
-        dados = {
-            'timestamp': datetime.now().isoformat(),
-            'url': self.driver.current_url,
-            'total_resultados': None,
-            'anuncios': []
-        }
-        
-        # 1. Extrair contagem total de resultados
-        # A contagem geralmente está em um heading com texto tipo "123 results"
-        dados['total_resultados'] = self._extrair_total_resultados()
-        
-        # 2. Scroll para carregar os anúncios
-        self._scroll_progressivo(scrolls=5)
-        
-        # 3. Extrair cards de anúncios
-        dados['anuncios'] = self._extrair_anuncios()
-        
-        return dados
-    
     def _extrair_total_resultados(self):
         """
-        Extrai o número total de resultados
-        Exemplo: "34 results" ou "34 resultados"
+        Extrai APENAS o número total de resultados
+        Exemplo: "~1 result" ou "36 results"
         """
         try:
-            # Tenta encontrar o elemento com a contagem
-            # Baseado na sua observação: classe específica com aria-level="3"
+            # O seletor que você mencionou - funciona!
             selectors = [
                 "div.x8t9es0.x1uxerd5.xrohxju.x108nfp6.xq9mrsl.x1h4wwuj.x117nqv4.xeuugli",
-                "div[role='heading'][aria-level='3']",
-                "h3",
-                "[class*='result']"
+                "div[role='heading'][aria-level='3']"
             ]
             
             for selector in selectors:
@@ -191,107 +178,16 @@ class MetaAdsScraper:
                     elementos = self.driver.find_elements(By.CSS_SELECTOR, selector)
                     for elem in elementos:
                         texto = elem.text.strip()
-                        # Procura por texto que contenha números + "result" ou similar
-                        if re.search(r'\d+\s*(result|anúnc|ad)', texto, re.IGNORECASE):
+                        # Procura por "X result" ou "X resultados"
+                        if 'result' in texto.lower() or 'anúnc' in texto.lower():
                             return texto
                 except:
                     continue
-            
-            # Se não encontrou, procura por qualquer texto com "result"
-            try:
-                elementos = self.driver.find_elements(By.XPATH, "//*[contains(text(), 'result') or contains(text(), 'anúnc')]")
-                for elem in elementos[:5]:
-                    texto = elem.text.strip()
-                    if any(char.isdigit() for char in texto):
-                        return texto
-            except:
-                pass
             
             return "Não encontrado"
         
         except Exception as e:
             return f"Erro: {str(e)}"
-    
-    def _extrair_anuncios(self):
-        """
-        Extrai cards de anúncios individuais
-        Cada anúncio no Facebook Ads Library tem uma estrutura específica
-        """
-        anuncios = []
-        
-        try:
-            # O Facebook usa estruturas dinâmicas
-            # Vamos procurar por padrões comuns de cards de anúncios
-            
-            # Estratégia 1: Procurar por links de snapshot de anúncios
-            # Cada anúncio tem um link único para ver detalhes
-            ad_links = self.driver.find_elements(By.CSS_SELECTOR, "a[href*='ad_library_id']")
-            
-            if ad_links:
-                st.info(f"Encontrados {len(ad_links)} links de anúncios")
-                
-                # Para cada link, pega o container pai que deve ter o conteúdo do anúncio
-                for idx, link in enumerate(ad_links[:30]):  # Limita a 30
-                    try:
-                        # Pega o container do anúncio (geralmente vários níveis acima)
-                        ad_container = link.find_element(By.XPATH, "./ancestor::div[contains(@class, 'x1y1aw1k') or contains(@class, 'x1n2onr6')]")
-                        
-                        # Extrai informações
-                        ad_id = re.search(r'ad_library_id=(\d+)', link.get_attribute('href'))
-                        ad_id = ad_id.group(1) if ad_id else f"unknown_{idx}"
-                        
-                        # Texto do anúncio
-                        texto_completo = ad_container.text
-                        
-                        anuncios.append({
-                            'index': idx + 1,
-                            'ad_id': ad_id,
-                            'url': link.get_attribute('href'),
-                            'texto': texto_completo[:1000] if texto_completo else "Sem texto"
-                        })
-                    
-                    except Exception as e:
-                        continue
-            
-            # Estratégia 2: Se não encontrou com links, tenta por estrutura de card
-            if len(anuncios) == 0:
-                # Procura por divs que parecem ser cards de anúncios
-                possible_cards = self.driver.find_elements(By.CSS_SELECTOR, 
-                    "div[class*='x1y1aw1k'], div[class*='x1n2onr6'], div[data-pagelet]")
-                
-                for idx, card in enumerate(possible_cards[:30]):
-                    try:
-                        texto = card.text.strip()
-                        # Filtra cards que parecem ter conteúdo de anúncio
-                        if texto and len(texto) > 50 and 'cookie' not in texto.lower():
-                            anuncios.append({
-                                'index': idx + 1,
-                                'ad_id': f'card_{idx}',
-                                'texto': texto[:1000]
-                            })
-                    except:
-                        continue
-        
-        except Exception as e:
-            st.error(f"Erro ao extrair anúncios: {str(e)}")
-        
-        return anuncios
-    
-    def _scroll_progressivo(self, scrolls=5):
-        """
-        Scroll progressivo para carregar conteúdo dinâmico
-        """
-        for i in range(scrolls):
-            try:
-                # Scroll até o final da página
-                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(3)
-                
-                # Scroll um pouco para cima para triggar lazy loading
-                self.driver.execute_script("window.scrollBy(0, -200);")
-                time.sleep(1)
-            except:
-                break
 
 
 def main():
@@ -312,9 +208,9 @@ def main():
         ---
         
         **⚠️ Importante:**
-        - Primeira busca pode demorar ~15 segundos
-        - Extrai até 30 anúncios por busca
-        - Funciona melhor com páginas ativas
+        - Tempo de busca: ~5 segundos
+        - Extrai APENAS o total de resultados
+        - Rápido e objetivo!
         """)
         
         st.markdown("---")
@@ -344,7 +240,7 @@ def main():
         
         if st.button("🔎 Buscar Anúncios", key="btn_page_id"):
             if page_id:
-                with st.spinner("🚀 Acessando página e extraindo dados... (pode levar até 20 segundos)"):
+                with st.spinner("🚀 Extraindo total de resultados... (~5 segundos)"):
                     dados = scraper.buscar_por_page_id(page_id)
                     if dados:
                         exibir_resultados(dados)
@@ -363,7 +259,7 @@ def main():
         
         if st.button("🔎 Buscar Anúncios", key="btn_url"):
             if url:
-                with st.spinner("🚀 Processando URL..."):
+                with st.spinner("🚀 Extraindo total de resultados..."):
                     dados = scraper.buscar_por_url(url)
                     if dados:
                         exibir_resultados(dados)
@@ -372,7 +268,7 @@ def main():
 
 
 def exibir_resultados(dados):
-    """Exibe os resultados de forma clara"""
+    """Exibe APENAS o total de resultados - limpo e simples"""
     
     if 'erro' in dados:
         st.error(f"❌ Erro: {dados['erro']}")
@@ -380,60 +276,33 @@ def exibir_resultados(dados):
     
     st.success("✅ Extração concluída!")
     
-    # Métricas
-    col1, col2, col3 = st.columns(3)
+    # APENAS O TOTAL - centralizado e grande
+    st.markdown("---")
     
-    with col1:
-        st.metric("📊 Total", dados.get('total_resultados', 'N/A'))
+    col1, col2, col3 = st.columns([1, 2, 1])
     
     with col2:
-        st.metric("📦 Extraídos", len(dados.get('anuncios', [])))
-    
-    with col3:
-        st.metric("🕐 Hora", datetime.now().strftime("%H:%M:%S"))
+        st.markdown(f"""
+        <div style="text-align: center; padding: 2rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 15px; color: white;">
+            <h1 style="font-size: 4rem; margin: 0; font-weight: bold;">{dados.get('total_resultados', 'N/A')}</h1>
+            <p style="font-size: 1.5rem; margin-top: 1rem; opacity: 0.9;">Total de Anúncios</p>
+        </div>
+        """, unsafe_allow_html=True)
     
     st.markdown("---")
     
-    # URL
-    with st.expander("🔗 URL acessada"):
-        st.code(dados.get('url', 'N/A'))
+    # Link para ver no Facebook
+    st.info(f"**🔗 Ver anúncios no Facebook:** [Clique aqui]({dados.get('url', '#')})")
     
-    # Anúncios
-    anuncios = dados.get('anuncios', [])
+    # Download simples dos dados
+    json_str = json.dumps(dados, ensure_ascii=False, indent=2)
     
-    if anuncios:
-        st.subheader(f"📢 {len(anuncios)} Anúncios Encontrados")
-        
-        for ad in anuncios:
-            with st.expander(f"Anúncio #{ad['index']} - ID: {ad.get('ad_id', 'N/A')}"):
-                if 'url' in ad:
-                    st.markdown(f"**[Ver anúncio no Facebook →]({ad['url']})**")
-                st.text_area(
-                    "Conteúdo",
-                    ad['texto'],
-                    height=200,
-                    key=f"ad_{ad['index']}"
-                )
-        
-        # Download
-        st.markdown("---")
-        json_str = json.dumps(dados, ensure_ascii=False, indent=2)
-        
-        st.download_button(
-            label="📥 Baixar todos os dados (JSON)",
-            data=json_str,
-            file_name=f"meta_ads_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-            mime="application/json"
-        )
-    else:
-        st.warning("⚠️ Nenhum anúncio foi extraído")
-        st.info("""
-        **Possíveis causas:**
-        - A página não tem anúncios ativos
-        - O Page ID está incorreto
-        - A página não carregou completamente (tente novamente)
-        - Estrutura do Facebook mudou (entre em contato)
-        """)
+    st.download_button(
+        label="📥 Baixar dados (JSON)",
+        data=json_str,
+        file_name=f"meta_ads_total_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+        mime="application/json"
+    )
 
 
 if __name__ == "__main__":

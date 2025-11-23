@@ -1,18 +1,20 @@
 """
 Meta Ads Library Scraper - Web App
-Versão CORRIGIDA com Selenium usando Chromium do sistema
+Versão REFATORADA com estrutura correta da página do Facebook
 """
 
 import streamlit as st
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 import time
 import json
 from datetime import datetime
-import os
+import re
 
 # Configuração da página
 st.set_page_config(
@@ -49,11 +51,6 @@ st.markdown("""
         font-size: 1.1rem;
         font-weight: bold;
         border-radius: 8px;
-        transition: all 0.3s;
-    }
-    .stButton>button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
     }
     </style>
 """, unsafe_allow_html=True)
@@ -62,13 +59,12 @@ st.markdown("""
 @st.cache_resource
 def get_driver():
     """
-    Inicializa o ChromeDriver usando Chromium do sistema (Streamlit Cloud)
-    Cache para reutilizar o mesmo driver
+    Inicializa o ChromeDriver com configurações otimizadas
     """
     options = Options()
     
-    # Configurações essenciais para Streamlit Cloud
-    options.add_argument('--headless')
+    # Configurações essenciais
+    options.add_argument('--headless=new')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
     options.add_argument('--disable-gpu')
@@ -78,251 +74,224 @@ def get_driver():
     options.add_argument('--log-level=3')
     options.add_argument('--silent')
     options.add_argument('--disable-blink-features=AutomationControlled')
-    options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
     
-    # Configurações de performance
-    # options.add_argument('--disable-images')  # Comentado - pode ajudar no debug
+    # User agent realista
+    options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
     
-    # IMPORTANTE: Usar Chromium do sistema (instalado via apt.txt)
+    # Configuração de janela
+    options.add_argument('--window-size=1920,1080')
+    
+    # Usar Chromium do sistema
     options.binary_location = '/usr/bin/chromium'
     
     try:
-        # Usa o chromedriver do sistema (instalado via apt.txt)
         service = Service(executable_path='/usr/bin/chromedriver')
         driver = webdriver.Chrome(service=service, options=options)
-        driver.set_page_load_timeout(30)
+        driver.set_page_load_timeout(60)
         return driver
-    
     except Exception as e:
-        st.error(f"""
-        ❌ Erro ao iniciar Chrome/Chromium: {str(e)}
-        
-        **Verifique:**
-        1. Arquivo `packages.txt` existe com:
-           ```
-           chromium
-           chromium-chromedriver
-           ```
-        
-        2. OU arquivo `apt.txt` existe com:
-           ```
-           chromium
-           chromium-chromedriver
-           ```
-        """)
+        st.error(f"❌ Erro ao iniciar Chrome: {str(e)}")
         return None
 
 
 class MetaAdsScraper:
-    """Classe do scraper usando Selenium"""
+    """
+    Scraper refatorado com estrutura correta do Facebook Ads Library
+    """
     
     def __init__(self, driver):
         self.driver = driver
-        self.wait = WebDriverWait(self.driver, 15) if driver else None
+        self.wait = WebDriverWait(self.driver, 20) if driver else None
+    
+    def buscar_por_page_id(self, page_id):
+        """Busca anúncios de uma página específica"""
+        if not self.driver:
+            return None
+        
+        url = f"https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=ALL&view_all_page_id={page_id}"
+        
+        try:
+            self.driver.get(url)
+            
+            # Aguarda a página carregar completamente
+            time.sleep(10)
+            
+            return self._extrair_dados()
+        
+        except Exception as e:
+            return {
+                'erro': str(e),
+                'url': url,
+                'timestamp': datetime.now().isoformat()
+            }
     
     def buscar_por_url(self, url):
         """Busca por URL completa"""
         if not self.driver:
             return None
         
-        # Extrai Page ID se existir
-        import re
+        # Extrai Page ID da URL
         match = re.search(r'view_all_page_id=(\d+)', url)
         if match:
-            page_id = match.group(1)
-            return self.buscar_por_page_id(page_id)
+            return self.buscar_por_page_id(match.group(1))
         
-        self.driver.get(url)
-        time.sleep(5)
-        return self._extrair_dados()
-    
-    def buscar_por_page_id(self, page_id):
-        """Busca por Page ID"""
-        if not self.driver:
-            return None
-        
-        url = f"https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=ALL&view_all_page_id={page_id}"
-        self.driver.get(url)
-        time.sleep(5)
-        return self._extrair_dados()
-    
-    def buscar_por_termo(self, termo, country='BR'):
-        """Busca por termo"""
-        if not self.driver:
-            return None
-        
-        url = f"https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country={country}&q={termo}"
-        self.driver.get(url)
-        time.sleep(5)
-        return self._extrair_dados()
+        # Ou usa a URL diretamente
+        try:
+            self.driver.get(url)
+            time.sleep(10)
+            return self._extrair_dados()
+        except Exception as e:
+            return {
+                'erro': str(e),
+                'url': url,
+                'timestamp': datetime.now().isoformat()
+            }
     
     def _extrair_dados(self):
-        """Extrai dados da página com múltiplos seletores"""
+        """
+        Extrai dados da página do Facebook Ads Library
+        Baseado na estrutura real da página
+        """
         dados = {
             'timestamp': datetime.now().isoformat(),
             'url': self.driver.current_url,
             'total_resultados': None,
-            'anuncios': [],
-            'page_source_length': len(self.driver.page_source)
+            'anuncios': []
         }
         
-        # Aguarda a página carregar completamente
-        time.sleep(8)
+        # 1. Extrair contagem total de resultados
+        # A contagem geralmente está em um heading com texto tipo "123 results"
+        dados['total_resultados'] = self._extrair_total_resultados()
         
-        # Extrai total de resultados - tenta vários seletores
-        total_encontrado = False
+        # 2. Scroll para carregar os anúncios
+        self._scroll_progressivo(scrolls=5)
         
-        # Método 1: Pelo seletor que você mencionou
-        try:
-            elemento = self.driver.find_element(
-                By.CSS_SELECTOR, 
-                "div.x8t9es0.x1uxerd5.xrohxju.x108nfp6.xq9mrsl.x1h4wwuj.x117nqv4.xeuugli"
-            )
-            dados['total_resultados'] = elemento.text
-            total_encontrado = True
-        except:
-            pass
-        
-        # Método 2: Por role e aria-level
-        if not total_encontrado:
-            try:
-                elemento = self.driver.find_element(
-                    By.CSS_SELECTOR, 
-                    "div[role='heading'][aria-level='3']"
-                )
-                dados['total_resultados'] = elemento.text
-                total_encontrado = True
-            except:
-                pass
-        
-        # Método 3: Busca por texto que contém "result"
-        if not total_encontrado:
-            try:
-                elementos = self.driver.find_elements(By.XPATH, "//*[contains(text(), 'result')]")
-                for elem in elementos:
-                    texto = elem.text.lower()
-                    if 'result' in texto and any(char.isdigit() for char in texto):
-                        dados['total_resultados'] = elem.text
-                        total_encontrado = True
-                        break
-            except:
-                pass
-        
-        # Método 4: Busca qualquer heading level 3
-        if not total_encontrado:
-            try:
-                elementos = self.driver.find_elements(By.CSS_SELECTOR, "h3, [role='heading']")
-                for elem in elementos:
-                    texto = elem.text
-                    if texto and any(char.isdigit() for char in texto):
-                        dados['total_resultados'] = texto
-                        total_encontrado = True
-                        break
-            except:
-                pass
-        
-        if not total_encontrado:
-            dados['total_resultados'] = "Não encontrado (verifique seletores)"
-        
-        # Rola a página para carregar mais conteúdo
-        self._scroll_page(scrolls=5, delay=3)
-        
-        # Extrai anúncios - múltiplos métodos
-        anuncios_encontrados = 0
-        
-        # Método 1: Por data-pagelet
-        try:
-            cards = self.driver.find_elements(By.CSS_SELECTOR, "div[data-pagelet]")
-            for i, card in enumerate(cards[:30]):
-                try:
-                    texto = card.text
-                    if texto and len(texto) > 30:
-                        dados['anuncios'].append({
-                            'index': anuncios_encontrados + 1,
-                            'texto': texto[:500],
-                            'metodo': 'data-pagelet'
-                        })
-                        anuncios_encontrados += 1
-                except:
-                    continue
-        except:
-            pass
-        
-        # Método 2: Por estrutura de card comum
-        if anuncios_encontrados == 0:
-            try:
-                selectors = [
-                    "div[class*='_5pcr']",
-                    "div[class*='_4-u2']",
-                    "div[class*='_3-8y']",
-                    "div[data-testid*='ad']",
-                    "article",
-                    "div[role='article']"
-                ]
-                
-                for selector in selectors:
-                    cards = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                    if cards:
-                        for i, card in enumerate(cards[:30]):
-                            try:
-                                texto = card.text
-                                if texto and len(texto) > 30:
-                                    dados['anuncios'].append({
-                                        'index': anuncios_encontrados + 1,
-                                        'texto': texto[:500],
-                                        'metodo': selector
-                                    })
-                                    anuncios_encontrados += 1
-                            except:
-                                continue
-                        if anuncios_encontrados > 0:
-                            break
-            except:
-                pass
-        
-        # Método 3: Captura tudo que parece ser um card
-        if anuncios_encontrados == 0:
-            try:
-                # Pega todos os divs com bastante texto
-                all_divs = self.driver.find_elements(By.TAG_NAME, "div")
-                for i, div in enumerate(all_divs):
-                    try:
-                        texto = div.text
-                        # Se tem entre 100 e 2000 caracteres, provavelmente é um anúncio
-                        if texto and 100 < len(texto) < 2000:
-                            dados['anuncios'].append({
-                                'index': anuncios_encontrados + 1,
-                                'texto': texto[:500],
-                                'metodo': 'div-text-length'
-                            })
-                            anuncios_encontrados += 1
-                            if anuncios_encontrados >= 20:
-                                break
-                    except:
-                        continue
-            except:
-                pass
-        
-        # Debug info
-        dados['debug_info'] = {
-            'total_divs': len(self.driver.find_elements(By.TAG_NAME, "div")),
-            'total_elements': len(self.driver.find_elements(By.CSS_SELECTOR, "*")),
-            'page_title': self.driver.title
-        }
-        
-        # Captura preview do HTML para debug
-        try:
-            dados['page_source_preview'] = self.driver.page_source[:5000]
-        except:
-            pass
+        # 3. Extrair cards de anúncios
+        dados['anuncios'] = self._extrair_anuncios()
         
         return dados
     
-    def _scroll_page(self, scrolls=5, delay=2):
-        """Rola a página"""
+    def _extrair_total_resultados(self):
+        """
+        Extrai o número total de resultados
+        Exemplo: "34 results" ou "34 resultados"
+        """
+        try:
+            # Tenta encontrar o elemento com a contagem
+            # Baseado na sua observação: classe específica com aria-level="3"
+            selectors = [
+                "div.x8t9es0.x1uxerd5.xrohxju.x108nfp6.xq9mrsl.x1h4wwuj.x117nqv4.xeuugli",
+                "div[role='heading'][aria-level='3']",
+                "h3",
+                "[class*='result']"
+            ]
+            
+            for selector in selectors:
+                try:
+                    elementos = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    for elem in elementos:
+                        texto = elem.text.strip()
+                        # Procura por texto que contenha números + "result" ou similar
+                        if re.search(r'\d+\s*(result|anúnc|ad)', texto, re.IGNORECASE):
+                            return texto
+                except:
+                    continue
+            
+            # Se não encontrou, procura por qualquer texto com "result"
+            try:
+                elementos = self.driver.find_elements(By.XPATH, "//*[contains(text(), 'result') or contains(text(), 'anúnc')]")
+                for elem in elementos[:5]:
+                    texto = elem.text.strip()
+                    if any(char.isdigit() for char in texto):
+                        return texto
+            except:
+                pass
+            
+            return "Não encontrado"
+        
+        except Exception as e:
+            return f"Erro: {str(e)}"
+    
+    def _extrair_anuncios(self):
+        """
+        Extrai cards de anúncios individuais
+        Cada anúncio no Facebook Ads Library tem uma estrutura específica
+        """
+        anuncios = []
+        
+        try:
+            # O Facebook usa estruturas dinâmicas
+            # Vamos procurar por padrões comuns de cards de anúncios
+            
+            # Estratégia 1: Procurar por links de snapshot de anúncios
+            # Cada anúncio tem um link único para ver detalhes
+            ad_links = self.driver.find_elements(By.CSS_SELECTOR, "a[href*='ad_library_id']")
+            
+            if ad_links:
+                st.info(f"Encontrados {len(ad_links)} links de anúncios")
+                
+                # Para cada link, pega o container pai que deve ter o conteúdo do anúncio
+                for idx, link in enumerate(ad_links[:30]):  # Limita a 30
+                    try:
+                        # Pega o container do anúncio (geralmente vários níveis acima)
+                        ad_container = link.find_element(By.XPATH, "./ancestor::div[contains(@class, 'x1y1aw1k') or contains(@class, 'x1n2onr6')]")
+                        
+                        # Extrai informações
+                        ad_id = re.search(r'ad_library_id=(\d+)', link.get_attribute('href'))
+                        ad_id = ad_id.group(1) if ad_id else f"unknown_{idx}"
+                        
+                        # Texto do anúncio
+                        texto_completo = ad_container.text
+                        
+                        anuncios.append({
+                            'index': idx + 1,
+                            'ad_id': ad_id,
+                            'url': link.get_attribute('href'),
+                            'texto': texto_completo[:1000] if texto_completo else "Sem texto"
+                        })
+                    
+                    except Exception as e:
+                        continue
+            
+            # Estratégia 2: Se não encontrou com links, tenta por estrutura de card
+            if len(anuncios) == 0:
+                # Procura por divs que parecem ser cards de anúncios
+                possible_cards = self.driver.find_elements(By.CSS_SELECTOR, 
+                    "div[class*='x1y1aw1k'], div[class*='x1n2onr6'], div[data-pagelet]")
+                
+                for idx, card in enumerate(possible_cards[:30]):
+                    try:
+                        texto = card.text.strip()
+                        # Filtra cards que parecem ter conteúdo de anúncio
+                        if texto and len(texto) > 50 and 'cookie' not in texto.lower():
+                            anuncios.append({
+                                'index': idx + 1,
+                                'ad_id': f'card_{idx}',
+                                'texto': texto[:1000]
+                            })
+                    except:
+                        continue
+        
+        except Exception as e:
+            st.error(f"Erro ao extrair anúncios: {str(e)}")
+        
+        return anuncios
+    
+    def _scroll_progressivo(self, scrolls=5):
+        """
+        Scroll progressivo para carregar conteúdo dinâmico
+        """
         for i in range(scrolls):
-            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(delay)
+            try:
+                # Scroll até o final da página
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(3)
+                
+                # Scroll um pouco para cima para triggar lazy loading
+                self.driver.execute_script("window.scrollBy(0, -200);")
+                time.sleep(1)
+            except:
+                break
 
 
 def main():
@@ -334,46 +303,38 @@ def main():
     with st.sidebar:
         st.header("📋 Como usar")
         st.markdown("""
-        **3 formas de buscar:**
+        **2 formas de buscar:**
         
         1️⃣ **Page ID**: Cole o ID numérico da página
         
-        2️⃣ **URL Completa**: Cole a URL da biblioteca
-        
-        3️⃣ **Termo de Busca**: Busque por palavra-chave
+        2️⃣ **URL Completa**: Cole a URL completa da biblioteca
         
         ---
         
-        **Dicas:**
-        - A primeira busca pode demorar (inicia o navegador)
-        - Page ID é o mais rápido
-        - Máximo de 20 anúncios por busca
+        **⚠️ Importante:**
+        - Primeira busca pode demorar ~15 segundos
+        - Extrai até 30 anúncios por busca
+        - Funciona melhor com páginas ativas
         """)
         
-        st.header("ℹ️ Sobre")
-        st.info("Ferramenta para extrair dados públicos da Biblioteca de Anúncios Meta/Facebook")
-        
         st.markdown("---")
-        st.markdown("**Versão:** 2.0 (Selenium + Chromium)")
+        st.markdown("**Versão:** 3.0 (Refatorada)")
     
-    # Inicializa o driver (apenas uma vez graças ao cache)
+    # Inicializa driver
     driver = get_driver()
     
     if not driver:
-        st.error("❌ Não foi possível iniciar o navegador. Verifique a configuração do Chromium.")
+        st.error("❌ Não foi possível iniciar o navegador")
         st.stop()
     
     scraper = MetaAdsScraper(driver)
     
     # Tabs
-    tab1, tab2, tab3 = st.tabs(["🆔 Page ID", "🔗 URL Completa", "🔍 Termo de Busca"])
+    tab1, tab2 = st.tabs(["🆔 Page ID", "🔗 URL Completa"])
     
-    # ============================================
     # TAB 1: Page ID
-    # ============================================
     with tab1:
         st.subheader("Buscar por Page ID")
-        st.markdown("Cole o ID numérico da página do Facebook")
         
         page_id = st.text_input(
             "Page ID",
@@ -381,25 +342,18 @@ def main():
             key="page_id_input"
         )
         
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            buscar_page_id = st.button("🔎 Buscar Anúncios", key="btn_page_id", use_container_width=True)
-        
-        if buscar_page_id and page_id:
-            with st.spinner("🚀 Buscando dados com Selenium..."):
-                try:
+        if st.button("🔎 Buscar Anúncios", key="btn_page_id"):
+            if page_id:
+                with st.spinner("🚀 Acessando página e extraindo dados... (pode levar até 20 segundos)"):
                     dados = scraper.buscar_por_page_id(page_id)
                     if dados:
                         exibir_resultados(dados)
-                except Exception as e:
-                    st.error(f"❌ Erro: {e}")
+            else:
+                st.warning("⚠️ Digite um Page ID")
     
-    # ============================================
     # TAB 2: URL Completa
-    # ============================================
     with tab2:
         st.subheader("Buscar por URL Completa")
-        st.markdown("Cole a URL completa da biblioteca de anúncios")
         
         url = st.text_input(
             "URL Completa",
@@ -407,102 +361,57 @@ def main():
             key="url_input"
         )
         
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            buscar_url = st.button("🔎 Buscar Anúncios", key="btn_url", use_container_width=True)
-        
-        if buscar_url and url:
-            with st.spinner("🚀 Processando URL..."):
-                try:
+        if st.button("🔎 Buscar Anúncios", key="btn_url"):
+            if url:
+                with st.spinner("🚀 Processando URL..."):
                     dados = scraper.buscar_por_url(url)
                     if dados:
                         exibir_resultados(dados)
-                except Exception as e:
-                    st.error(f"❌ Erro: {e}")
-    
-    # ============================================
-    # TAB 3: Termo de Busca
-    # ============================================
-    with tab3:
-        st.subheader("Buscar por Termo")
-        st.markdown("Busque anúncios por palavra-chave")
-        
-        col1, col2 = st.columns([3, 1])
-        
-        with col1:
-            termo = st.text_input(
-                "Termo de busca",
-                placeholder="Ex: Fé e Jogos",
-                key="termo_input"
-            )
-        
-        with col2:
-            country = st.selectbox(
-                "País",
-                ["BR", "US", "PT", "ES", "AR", "MX"],
-                key="country_select"
-            )
-        
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            buscar_termo = st.button("🔎 Buscar Anúncios", key="btn_termo", use_container_width=True)
-        
-        if buscar_termo and termo:
-            with st.spinner(f"🚀 Buscando '{termo}' em {country}..."):
-                try:
-                    dados = scraper.buscar_por_termo(termo, country)
-                    if dados:
-                        exibir_resultados(dados)
-                except Exception as e:
-                    st.error(f"❌ Erro: {e}")
+            else:
+                st.warning("⚠️ Cole uma URL")
 
 
 def exibir_resultados(dados):
-    """Exibe os resultados"""
-    st.success("✅ Busca concluída!")
+    """Exibe os resultados de forma clara"""
+    
+    if 'erro' in dados:
+        st.error(f"❌ Erro: {dados['erro']}")
+        return
+    
+    st.success("✅ Extração concluída!")
     
     # Métricas
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        st.metric("📊 Total de Resultados", dados.get('total_resultados', 'N/A'))
+        st.metric("📊 Total", dados.get('total_resultados', 'N/A'))
     
     with col2:
-        st.metric("📦 Anúncios Extraídos", len(dados.get('anuncios', [])))
+        st.metric("📦 Extraídos", len(dados.get('anuncios', [])))
     
     with col3:
-        st.metric("🕐 Timestamp", datetime.now().strftime("%H:%M:%S"))
+        st.metric("🕐 Hora", datetime.now().strftime("%H:%M:%S"))
     
     st.markdown("---")
     
-    # Debug Info
-    if 'debug_info' in dados:
-        with st.expander("🔍 Informações de Debug"):
-            debug = dados['debug_info']
-            st.write(f"**Título da página:** {debug.get('page_title', 'N/A')}")
-            st.write(f"**Total de DIVs:** {debug.get('total_divs', 0)}")
-            st.write(f"**Total de elementos:** {debug.get('total_elements', 0)}")
-            st.write(f"**Tamanho do HTML:** {dados.get('page_source_length', 0)} caracteres")
-    
-    # URL da busca
-    with st.expander("🔗 URL da busca"):
+    # URL
+    with st.expander("🔗 URL acessada"):
         st.code(dados.get('url', 'N/A'))
     
-    # Screenshot do que foi carregado (se possível)
-    with st.expander("📸 Preview do HTML (primeiros 5000 caracteres)"):
-        if 'page_source_preview' in dados:
-            st.code(dados['page_source_preview'][:5000], language='html')
-    
     # Anúncios
-    if dados.get('anuncios'):
-        st.subheader(f"📢 {len(dados['anuncios'])} Anúncios Encontrados")
+    anuncios = dados.get('anuncios', [])
+    
+    if anuncios:
+        st.subheader(f"📢 {len(anuncios)} Anúncios Encontrados")
         
-        for ad in dados['anuncios']:
-            with st.expander(f"Anúncio #{ad['index']} (Método: {ad.get('metodo', 'N/A')})"):
+        for ad in anuncios:
+            with st.expander(f"Anúncio #{ad['index']} - ID: {ad.get('ad_id', 'N/A')}"):
+                if 'url' in ad:
+                    st.markdown(f"**[Ver anúncio no Facebook →]({ad['url']})**")
                 st.text_area(
                     "Conteúdo",
                     ad['texto'],
-                    height=150,
+                    height=200,
                     key=f"ad_{ad['index']}"
                 )
         
@@ -510,35 +419,21 @@ def exibir_resultados(dados):
         st.markdown("---")
         json_str = json.dumps(dados, ensure_ascii=False, indent=2)
         
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            st.download_button(
-                label="📥 Baixar dados (JSON)",
-                data=json_str,
-                file_name=f"meta_ads_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                mime="application/json",
-                use_container_width=True
-            )
+        st.download_button(
+            label="📥 Baixar todos os dados (JSON)",
+            data=json_str,
+            file_name=f"meta_ads_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+            mime="application/json"
+        )
     else:
         st.warning("⚠️ Nenhum anúncio foi extraído")
-        
         st.info("""
-        **💡 Possíveis causas:**
-        
-        1. **A página não carregou completamente** - Tente aumentar o tempo de espera
-        2. **Os seletores CSS mudaram** - O Facebook muda frequentemente a estrutura
-        3. **A página requer login** - Algumas páginas só mostram anúncios logado
-        4. **O Page ID está incorreto** - Verifique se o ID está correto
-        
-        **🔧 Soluções:**
-        - Tente buscar novamente (pode ser instabilidade)
-        - Verifique o "Preview do HTML" acima para ver se a página carregou
-        - Acesse a URL manualmente no navegador para confirmar que existem anúncios
+        **Possíveis causas:**
+        - A página não tem anúncios ativos
+        - O Page ID está incorreto
+        - A página não carregou completamente (tente novamente)
+        - Estrutura do Facebook mudou (entre em contato)
         """)
-        
-        # Botão para tentar novamente
-        if st.button("🔄 Tentar Novamente"):
-            st.rerun()
 
 
 if __name__ == "__main__":

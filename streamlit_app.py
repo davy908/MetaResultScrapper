@@ -1,28 +1,18 @@
 """
 Meta Ads Library Scraper - Web App
-Interface web bonita e fácil de usar com Streamlit
-VERSÃO CORRIGIDA PARA STREAMLIT CLOUD
+Versão CORRIGIDA com Selenium usando Chromium do sistema
 """
 
 import streamlit as st
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
 import time
 import json
 from datetime import datetime
-import pandas as pd
-
-# Importações do Selenium dentro de try/except
-try:
-    from selenium import webdriver
-    from selenium.webdriver.common.by import By
-    from selenium.webdriver.support.ui import WebDriverWait
-    from selenium.webdriver.chrome.service import Service
-    from selenium.webdriver.chrome.options import Options
-    from webdriver_manager.chrome import ChromeDriverManager
-    SELENIUM_AVAILABLE = True
-except ImportError:
-    SELENIUM_AVAILABLE = False
-    st.error("⚠️ Selenium não disponível. Instale com: pip install selenium webdriver-manager")
-
+import os
 
 # Configuração da página
 st.set_page_config(
@@ -32,8 +22,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-
-# CSS customizado para deixar bonito
+# CSS customizado
 st.markdown("""
     <style>
     .main-header {
@@ -66,66 +55,83 @@ st.markdown("""
         transform: translateY(-2px);
         box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
     }
-    .metric-card {
-        background: white;
-        padding: 1.5rem;
-        border-radius: 10px;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        margin: 1rem 0;
-    }
     </style>
 """, unsafe_allow_html=True)
 
 
+@st.cache_resource
+def get_driver():
+    """
+    Inicializa o ChromeDriver usando Chromium do sistema (Streamlit Cloud)
+    Cache para reutilizar o mesmo driver
+    """
+    options = Options()
+    
+    # Configurações essenciais para Streamlit Cloud
+    options.add_argument('--headless')
+    options.add_argument('--no-sandbox')
+    options.add_argument('--disable-dev-shm-usage')
+    options.add_argument('--disable-gpu')
+    options.add_argument('--disable-software-rasterizer')
+    options.add_argument('--disable-extensions')
+    options.add_argument('--disable-logging')
+    options.add_argument('--log-level=3')
+    options.add_argument('--silent')
+    options.add_argument('--disable-blink-features=AutomationControlled')
+    options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+    
+    # Configurações de performance
+    options.add_argument('--disable-images')
+    options.add_argument('--disable-javascript')  # Para páginas estáticas
+    
+    # IMPORTANTE: Usar Chromium do sistema (instalado via apt.txt)
+    options.binary_location = '/usr/bin/chromium'
+    
+    try:
+        # Usa o chromedriver do sistema (instalado via apt.txt)
+        service = Service(executable_path='/usr/bin/chromedriver')
+        driver = webdriver.Chrome(service=service, options=options)
+        driver.set_page_load_timeout(30)
+        return driver
+    
+    except Exception as e:
+        st.error(f"""
+        ❌ Erro ao iniciar Chrome/Chromium: {str(e)}
+        
+        **Verifique:**
+        1. Arquivo `packages.txt` existe com:
+           ```
+           chromium
+           chromium-chromedriver
+           ```
+        
+        2. OU arquivo `apt.txt` existe com:
+           ```
+           chromium
+           chromium-chromedriver
+           ```
+        """)
+        return None
+
+
 class MetaAdsScraper:
-    """Classe do scraper adaptada para Streamlit"""
+    """Classe do scraper usando Selenium"""
     
-    def __init__(self):
-        if not SELENIUM_AVAILABLE:
-            raise Exception("Selenium não está instalado. Verifique requirements.txt")
-        self.driver = None
-        self.wait = None
-    
-    def iniciar_navegador(self):
-        """Inicializa o navegador (headless para servidor)"""
-        if self.driver:
-            return
-        
-        options = Options()
-        options.add_argument('--headless')
-        options.add_argument('--no-sandbox')
-        options.add_argument('--disable-dev-shm-usage')
-        options.add_argument('--disable-gpu')
-        options.add_argument('--disable-blink-features=AutomationControlled')
-        options.add_argument('--log-level=3')
-        options.add_argument('--disable-software-rasterizer')
-        options.add_argument('--disable-extensions')
-        
-        # Para Streamlit Cloud (usa chromium-browser)
-        options.binary_location = '/usr/bin/chromium-browser'
-        
-        try:
-            # Tenta usar o chromedriver do sistema primeiro (Streamlit Cloud)
-            try:
-                service = Service('/usr/bin/chromedriver')
-                self.driver = webdriver.Chrome(service=service, options=options)
-            except:
-                # Fallback: usa webdriver-manager
-                service = Service(ChromeDriverManager().install())
-                self.driver = webdriver.Chrome(service=service, options=options)
-            
-            self.wait = WebDriverWait(self.driver, 15)
-        except Exception as e:
-            raise Exception(f"Erro ao iniciar navegador: {e}\n\nCertifique-se de que o arquivo apt.txt está presente com chromium-browser e chromium-chromedriver")
+    def __init__(self, driver):
+        self.driver = driver
+        self.wait = WebDriverWait(self.driver, 15) if driver else None
     
     def buscar_por_url(self, url):
         """Busca por URL completa"""
-        if "view_all_page_id=" in url:
-            import re
-            match = re.search(r'view_all_page_id=(\d+)', url)
-            if match:
-                page_id = match.group(1)
-                return self.buscar_por_page_id(page_id)
+        if not self.driver:
+            return None
+        
+        # Extrai Page ID se existir
+        import re
+        match = re.search(r'view_all_page_id=(\d+)', url)
+        if match:
+            page_id = match.group(1)
+            return self.buscar_por_page_id(page_id)
         
         self.driver.get(url)
         time.sleep(5)
@@ -133,6 +139,9 @@ class MetaAdsScraper:
     
     def buscar_por_page_id(self, page_id):
         """Busca por Page ID"""
+        if not self.driver:
+            return None
+        
         url = f"https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=ALL&view_all_page_id={page_id}"
         self.driver.get(url)
         time.sleep(5)
@@ -140,6 +149,9 @@ class MetaAdsScraper:
     
     def buscar_por_termo(self, termo, country='BR'):
         """Busca por termo"""
+        if not self.driver:
+            return None
+        
         url = f"https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country={country}&q={termo}"
         self.driver.get(url)
         time.sleep(5)
@@ -154,7 +166,7 @@ class MetaAdsScraper:
             'anuncios': []
         }
         
-        # Extrai total
+        # Extrai total de resultados
         try:
             elemento = self.driver.find_element(
                 By.CSS_SELECTOR, 
@@ -171,7 +183,7 @@ class MetaAdsScraper:
         try:
             cards = self.driver.find_elements(By.CSS_SELECTOR, "div[data-pagelet]")
             
-            for i, card in enumerate(cards[:20]):  # Pega até 20
+            for i, card in enumerate(cards[:20]):
                 try:
                     texto = card.text
                     if texto and len(texto) > 50:
@@ -191,24 +203,14 @@ class MetaAdsScraper:
         for i in range(scrolls):
             self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(delay)
-    
-    def fechar(self):
-        """Fecha o navegador"""
-        if self.driver:
-            self.driver.quit()
-            self.driver = None
 
-
-# ============================================
-# INTERFACE STREAMLIT
-# ============================================
 
 def main():
     # Header
     st.markdown('<h1 class="main-header">🕷️ Meta Ads Library Scraper</h1>', unsafe_allow_html=True)
     st.markdown('<p class="subtitle">Extraia dados da Biblioteca de Anúncios do Facebook/Instagram</p>', unsafe_allow_html=True)
     
-    # Sidebar com instruções
+    # Sidebar
     with st.sidebar:
         st.header("📋 Como usar")
         st.markdown("""
@@ -218,13 +220,13 @@ def main():
         
         2️⃣ **URL Completa**: Cole a URL da biblioteca
         
-        3️⃣ **Termo de busca**: Busque por palavra-chave
+        3️⃣ **Termo de Busca**: Busque por palavra-chave
         
         ---
         
         **Dicas:**
         - A primeira busca pode demorar (inicia o navegador)
-        - Busque por Page ID é o mais rápido
+        - Page ID é o mais rápido
         - Máximo de 20 anúncios por busca
         """)
         
@@ -232,10 +234,18 @@ def main():
         st.info("Ferramenta para extrair dados públicos da Biblioteca de Anúncios Meta/Facebook")
         
         st.markdown("---")
-        st.markdown("**Versão:** 1.0")
-        st.markdown("**Desenvolvido com:** Python + Selenium + Streamlit")
+        st.markdown("**Versão:** 2.0 (Selenium + Chromium)")
     
-    # Tabs para os 3 modos de busca
+    # Inicializa o driver (apenas uma vez graças ao cache)
+    driver = get_driver()
+    
+    if not driver:
+        st.error("❌ Não foi possível iniciar o navegador. Verifique a configuração do Chromium.")
+        st.stop()
+    
+    scraper = MetaAdsScraper(driver)
+    
+    # Tabs
     tab1, tab2, tab3 = st.tabs(["🆔 Page ID", "🔗 URL Completa", "🔍 Termo de Busca"])
     
     # ============================================
@@ -256,16 +266,11 @@ def main():
             buscar_page_id = st.button("🔎 Buscar Anúncios", key="btn_page_id", use_container_width=True)
         
         if buscar_page_id and page_id:
-            with st.spinner("🚀 Iniciando navegador e buscando dados..."):
+            with st.spinner("🚀 Buscando dados com Selenium..."):
                 try:
-                    scraper = MetaAdsScraper()
-                    scraper.iniciar_navegador()
-                    
                     dados = scraper.buscar_por_page_id(page_id)
-                    scraper.fechar()
-                    
-                    exibir_resultados(dados)
-                
+                    if dados:
+                        exibir_resultados(dados)
                 except Exception as e:
                     st.error(f"❌ Erro: {e}")
     
@@ -287,16 +292,11 @@ def main():
             buscar_url = st.button("🔎 Buscar Anúncios", key="btn_url", use_container_width=True)
         
         if buscar_url and url:
-            with st.spinner("🚀 Processando URL e buscando dados..."):
+            with st.spinner("🚀 Processando URL..."):
                 try:
-                    scraper = MetaAdsScraper()
-                    scraper.iniciar_navegador()
-                    
                     dados = scraper.buscar_por_url(url)
-                    scraper.fechar()
-                    
-                    exibir_resultados(dados)
-                
+                    if dados:
+                        exibir_resultados(dados)
                 except Exception as e:
                     st.error(f"❌ Erro: {e}")
     
@@ -330,23 +330,18 @@ def main():
         if buscar_termo and termo:
             with st.spinner(f"🚀 Buscando '{termo}' em {country}..."):
                 try:
-                    scraper = MetaAdsScraper()
-                    scraper.iniciar_navegador()
-                    
                     dados = scraper.buscar_por_termo(termo, country)
-                    scraper.fechar()
-                    
-                    exibir_resultados(dados)
-                
+                    if dados:
+                        exibir_resultados(dados)
                 except Exception as e:
                     st.error(f"❌ Erro: {e}")
 
 
 def exibir_resultados(dados):
-    """Exibe os resultados de forma bonita"""
+    """Exibe os resultados"""
     st.success("✅ Busca concluída!")
     
-    # Métricas em cards
+    # Métricas
     col1, col2, col3 = st.columns(3)
     
     with col1:
@@ -377,10 +372,8 @@ def exibir_resultados(dados):
                     key=f"ad_{ad['index']}"
                 )
         
-        # Botão de download
+        # Download
         st.markdown("---")
-        
-        # Converte para JSON
         json_str = json.dumps(dados, ensure_ascii=False, indent=2)
         
         col1, col2, col3 = st.columns([1, 2, 1])
